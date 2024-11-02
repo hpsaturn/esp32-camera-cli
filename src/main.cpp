@@ -1,7 +1,8 @@
 /**************************************************
- * ESPCam CLI Tester
+ * ESP32 Camera CLI
  * @hpsaturn Copyright (C) 2024
  * ----------------------------
+ * https://github.com/hpsaturn/esp32-camera-cli
 **************************************************/
 
 #include <Arduino.h>
