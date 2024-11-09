@@ -49,18 +49,21 @@ void processFrameExternalJPG() {
   }
 }
 
-void configCameraNoJPG() {
-  // Configuration without PSRAM, only DRAM.
-  // (faster and better quality)
+/**
+ * @brief config without PSRAM, only DRAM. (faster and better quality)
+ */
+void configCameraInternalJPG() {
+  
   Camera.config.jpeg_quality = jpgqlty;
   Camera.config.frame_size = FRAMESIZE_240X240;
   Camera.config.pixel_format = PIXFORMAT_JPEG;
   Camera.config.fb_location = CAMERA_FB_IN_DRAM;
 }
 
-void configCameraJPG() {
-  // Configuration using the PSRAM, external JPG processing.
-  // (less RAM and improved transfer size)
+/**
+ * @brief Config using PSRAM if it exists and external JPG processing. (improved transfer size)
+ */
+void configCameraExternalJPG() {
   Camera.config.jpeg_quality = jpgqlty;
   Camera.config.frame_size = FRAMESIZE_240X240;
   Camera.config.pixel_format = PIXFORMAT_RGB565;
@@ -182,9 +185,9 @@ void initCameraSetup() {
   }
   wcli.loop();
   if (jpgmode)
-    configCameraNoJPG();
+    configCameraInternalJPG();
   else
-    configCameraJPG();
+    configCameraExternalJPG();
 }
 
 void initSerialShell(){
@@ -226,8 +229,8 @@ void setup() {
   // My M5Core2 receiver B8:F0:09:C6:0E:CC
   // My CrowPanel receiver B0:81:84:74:18:2C
   // const uint8_t macRecv[6] = {0xB8,0xF0,0x09,0xC6,0x0E,0xCC};
-  const uint8_t macRecv[6] = {0xB0,0x81,0x84,0x74,0x18,0x2C};
-  radio.setTarget(macRecv);
+  // const uint8_t macRecv[6] = {0xB0,0x81,0x84,0x74,0x18,0x2C};
+  // radio.setTarget(macRecv);
   radio.init();
   
   btnB.attachClick([]() { shutdown(); });  
