@@ -11,7 +11,7 @@
 #include <ESP32WifiCLI.hpp>
 #include <EasyPreferences.hpp> 
 #include <drivers/CamXiao.h>
-#include <Utils.h>
+#include "utils.h"
 
 CamXiao Camera;  
 ESPNowCam radio;
@@ -26,13 +26,15 @@ bool jpgmode = true;
 bool debug = false;
 int jpgwait = 60;
 int jpgqlty = 9;
+// mac target (default: broadcasting)
+uint8_t tmac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};    
 
 void processFrameInternalJPG() {
   if (Camera.get()) {
     radio.sendData(Camera.fb->buf, Camera.fb->len);
-    delay(jpgwait);  // ==> weird delay when you are using only DRAM.
-    if (debug) printFPS("CAM:");
+    if (debug) print_FPS(5, 250, "CAM:", frame_camera, time_stamp_camera, Camera.fb->len);
     Camera.free();
+    delay(jpgwait);  // ==> weird delay when you are using only DRAM.
   }
 }
 
@@ -42,10 +44,10 @@ void processFrameExternalJPG() {
     size_t out_jpg_len = 0;
     frame2jpg(Camera.fb, Camera.config.jpeg_quality, &out_jpg, &out_jpg_len);
     radio.sendData(out_jpg, out_jpg_len);
-    delay(jpgwait);  // ==> weird delay when you are using only DRAM.
-    if (debug) printFPS("CAM:");
+    if (debug) print_FPS(5, 250, "CAM:", frame_camera, time_stamp_camera, out_jpg_len);
     free(out_jpg);
     Camera.free();
+    delay(jpgwait);  // ==> weird delay when you are using only DRAM.
   }
 }
 
@@ -84,11 +86,12 @@ void cameraInit() {
 
 void printSettings(Stream *response){
   response->println();
-  response->printf("jpeg decoder \t: %s\r\n",jpgmode ? "internal" : "external");
-  response->printf("jpeg quality \t: %i\r\n",Camera.config.jpeg_quality);
-  response->printf("jpeg delay   \t: %i\r\n",jpgwait);
-  response->printf("fbuffer count\t: %i\r\n",Camera.config.fb_count);
-  response->printf("frame size   \t: %i\r\n",Camera.config.frame_size);
+  response->printf("display target\t: %s\r\n",cfg.getString(PKEYS::KTMAC,"none").c_str());
+  response->printf("jpeg decoder  \t: %s\r\n",jpgmode ? "internal" : "external");
+  response->printf("jpeg quality  \t: %i\r\n",Camera.config.jpeg_quality);
+  response->printf("jpeg delay    \t: %i\r\n",jpgwait);
+  response->printf("fbuffer count \t: %i\r\n",Camera.config.fb_count);
+  response->printf("frame size    \t: %i\r\n",Camera.config.frame_size);
 }
 
 void info(char *args, Stream *response) {
@@ -123,6 +126,20 @@ void set_jpgd(char *args, Stream *response) {
   jpgwait = operands.first().toInt();
   response->printf("jpg decoding delay: \t%i\r\n", jpgwait);
   cfg.saveInt(PKEYS::KJPGD,jpgwait);
+}
+
+void set_target(char *args, Stream *response) {
+  if (!setup_mode){
+    response->println("This setting is only possible in setup mode. Type setup");
+    return;
+  }
+  Pair<String, String> operands = wcli.parseCommand(args);
+  String starget = operands.first();
+  if (str2mac(starget.c_str(), tmac)) {
+    cfg.saveString(PKEYS::KTMAC, starget);
+    response->printf("target display saved: \t%s\r\n",starget.c_str());
+  } else
+    response->println("mac address bad format");
 }
 
 void enable_debug(char *args, Stream *response) {
@@ -190,11 +207,26 @@ void initCameraSetup() {
     configCameraExternalJPG();
 }
 
+void espnowInit(){
+  // My M5Core2 receiver B8:F0:09:C6:0E:CC
+  // const uint8_t macRecv[6] = {0xB8,0xF0,0x09,0xC6,0x0E,0xCC};
+  // My CrowPanel receiver B0:81:84:74:18:2C
+  // const uint8_t macRecv[6] = {0xB0,0x81,0x84,0x74,0x18,0x2C};
+  String starget = cfg.getString(PKEYS::KTMAC,"");
+  if (!starget.isEmpty()){
+    str2mac(starget.c_str(), tmac);
+    radio.setTarget(tmac);
+    // for (int i=0; i<6; i++) response->printf("%02X:",tmac[i]);
+  }
+  radio.init();
+}
+
 void initSerialShell(){
   wcli.setSilentMode(true);  // less debug output
   wcli.add("jpgmode", &set_jpgm,       "\tinternal/external JPG decoder toggle");
   wcli.add("jpgqlty", &set_jpgq,       "\tset JPG quality");
   wcli.add("jpgwait", &set_jpgd,       "\tset JPG decoding delay");
+  wcli.add("target",  &set_target,     "\tset the macaddress of the display target");
   wcli.add("info",    &info,           "\t\tsystem status info");
   wcli.add("debug",   &enable_debug,   "\t\ttoggle debug mode");
   wcli.add("setup",   &setup_init,     "\t\tenter to safe mode or camera setup");
@@ -225,15 +257,9 @@ void setup() {
   initRemoteShell();
   initCameraSetup();
   cameraInit();
+  espnowInit();
 
-  // My M5Core2 receiver B8:F0:09:C6:0E:CC
-  // My CrowPanel receiver B0:81:84:74:18:2C
-  // const uint8_t macRecv[6] = {0xB8,0xF0,0x09,0xC6,0x0E,0xCC};
-  // const uint8_t macRecv[6] = {0xB0,0x81,0x84,0x74,0x18,0x2C};
-  // radio.setTarget(macRecv);
-  radio.init();
-  
-  btnB.attachClick([]() { shutdown(); });  
+  btnB.attachClick([]() { shutdown(); });
 }
 
 void loop() {
