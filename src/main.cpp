@@ -20,12 +20,14 @@ OneButton btnB(GPIO_NUM_0, true);
 const char* app_prompt   = "camcli";
 const char* setup_prompt = "setup";
 
+// Please change these values via CLI. Defaults:
 int setup_mode = 0;
 bool jpgmode = true;
 bool debug = false;
 int jpgwait = 60;
+int jpgqlty = 9;
 
-void processFrameNoJPG() {
+void processFrameInternalJPG() {
   if (Camera.get()) {
     radio.sendData(Camera.fb->buf, Camera.fb->len);
     delay(jpgwait);  // ==> weird delay when you are using only DRAM.
@@ -34,7 +36,7 @@ void processFrameNoJPG() {
   }
 }
 
-void processFrameJPG() {
+void processFrameExternalJPG() {
   if (Camera.get()) {
     uint8_t *out_jpg = NULL;
     size_t out_jpg_len = 0;
@@ -50,6 +52,7 @@ void processFrameJPG() {
 void configCameraNoJPG() {
   // Configuration without PSRAM, only DRAM.
   // (faster and better quality)
+  Camera.config.jpeg_quality = jpgqlty;
   Camera.config.frame_size = FRAMESIZE_240X240;
   Camera.config.pixel_format = PIXFORMAT_JPEG;
   Camera.config.fb_location = CAMERA_FB_IN_DRAM;
@@ -58,6 +61,7 @@ void configCameraNoJPG() {
 void configCameraJPG() {
   // Configuration using the PSRAM, external JPG processing.
   // (less RAM and improved transfer size)
+  Camera.config.jpeg_quality = jpgqlty;
   Camera.config.frame_size = FRAMESIZE_240X240;
   Camera.config.pixel_format = PIXFORMAT_RGB565;
   Camera.config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -77,7 +81,7 @@ void cameraInit() {
 
 void printSettings(Stream *response){
   response->println();
-  response->printf("jpeg internal\t: %s\r\n",jpgmode ? "enable" : "disable");
+  response->printf("jpeg decoder \t: %s\r\n",jpgmode ? "internal" : "external");
   response->printf("jpeg quality \t: %i\r\n",Camera.config.jpeg_quality);
   response->printf("jpeg delay   \t: %i\r\n",jpgwait);
   response->printf("fbuffer count\t: %i\r\n",Camera.config.fb_count);
@@ -91,29 +95,30 @@ void info(char *args, Stream *response) {
 
 void set_jpgm(char *args, Stream *response) {
   if (!setup_mode){
-    response->println("This setting only is possible in setup mode");
+    response->println("This setting is only possible in setup mode. Type setup");
     return;
   }
   jpgmode = !jpgmode;
   cfg.saveBool(PKEYS::KJPGM, jpgmode);
   if (jpgmode) {
-    response->println("Internal JPG ON");
+    response->println("processing with internal JPG decoder");
   }
   else {
-    response->println("Internal JPG OFF");
+    response->println("processing with external JPG decoder");
   }
 }
 
 void set_jpgq(char *args, Stream *response) {
   Pair<String, String> operands = wcli.parseCommand(args);
-  Camera.config.jpeg_quality = operands.first().toInt();
+  jpgqlty = operands.first().toInt();
+  Camera.config.jpeg_quality = jpgqlty;
+  cfg.saveInt(PKEYS::KJPGQ,jpgqlty);
 }
 
 void set_jpgd(char *args, Stream *response) {
   Pair<String, String> operands = wcli.parseCommand(args);
-  long x = (long)(operands.first().toDouble());
-  jpgwait = map(x, 50, 100, 50, 100);
-  response->printf("internal jpg decoding delay: %i\r\n", jpgwait);
+  jpgwait = operands.first().toInt();
+  response->printf("jpg decoding delay: \t%i\r\n", jpgwait);
   cfg.saveInt(PKEYS::KJPGD,jpgwait);
 }
 
@@ -164,9 +169,9 @@ void setup_exit(char *args, Stream *response) {
 void initCameraSetup() {
   jpgmode = cfg.getBool(PKEYS::KJPGM, true);
   jpgwait = cfg.getInt(PKEYS::KJPGD, 60);
+  jpgqlty = cfg.getInt(PKEYS::KJPGQ, 12);
   if (cfg.getBool(PKEYS::KSETUP, false)) {
     setup_mode=1;
-    uint32_t start = millis();
     Serial.println("\r\nCamera Setup. Type \"exit\" to leave");
     printSettings(&Serial);
     wcli.shell->setBannerText(setup_prompt);
@@ -184,12 +189,12 @@ void initCameraSetup() {
 
 void initSerialShell(){
   wcli.setSilentMode(true);  // less debug output
-  wcli.add("jpgmode", &set_jpgm,       "\tinternal JPG mode");
+  wcli.add("jpgmode", &set_jpgm,       "\tinternal/external JPG decoder toggle");
   wcli.add("jpgqlty", &set_jpgq,       "\tset JPG quality");
-  wcli.add("jpgwait", &set_jpgd,       "\tset delay for JPG decoding (default 60)");
+  wcli.add("jpgwait", &set_jpgd,       "\tset JPG decoding delay");
   wcli.add("info",    &info,           "\t\tsystem status info");
   wcli.add("debug",   &enable_debug,   "\t\ttoggle debug mode");
-  wcli.add("setup",   &setup_init,     "\t\tenter to safe mode camera setup");
+  wcli.add("setup",   &setup_init,     "\t\tenter to safe mode or camera setup");
   wcli.add("exit",    &setup_exit,     "\t\tleave setup mode");
   wcli.add("clear",   &clear,          "\t\tclear shell");
   wcli.add("halt",    &halt,           "\t\tperform a ESP32 deep sleep");
@@ -229,8 +234,8 @@ void setup() {
 }
 
 void loop() {
-  if (jpgmode) processFrameNoJPG();
-  else processFrameJPG();
+  if (jpgmode) processFrameInternalJPG();
+  else processFrameExternalJPG();
   btnB.tick();
   wcli.loop();
 }
