@@ -12,6 +12,7 @@
 #include <EasyPreferences.hpp> 
 #include <drivers/CamXiao.h>
 #include "utils.h"
+#include "menus.h"
 
 CamXiao Camera;  
 ESPNowCam radio;
@@ -26,8 +27,9 @@ bool jpgmode = true;
 bool debug = false;
 int jpgwait = 60;
 int jpgqlty = 9;
+framesize_t fsize = FRAMESIZE_QVGA;
 // mac target (default: broadcasting)
-uint8_t tmac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};    
+uint8_t tmac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 void processFrameInternalJPG() {
   if (Camera.get()) {
@@ -55,9 +57,6 @@ void processFrameExternalJPG() {
  * @brief config without PSRAM, only DRAM. (faster and better quality)
  */
 void configCameraInternalJPG() {
-  
-  Camera.config.jpeg_quality = jpgqlty;
-  Camera.config.frame_size = FRAMESIZE_240X240;
   Camera.config.pixel_format = PIXFORMAT_JPEG;
   Camera.config.fb_location = CAMERA_FB_IN_DRAM;
 }
@@ -66,10 +65,13 @@ void configCameraInternalJPG() {
  * @brief Config using PSRAM if it exists and external JPG processing. (improved transfer size)
  */
 void configCameraExternalJPG() {
-  Camera.config.jpeg_quality = jpgqlty;
-  Camera.config.frame_size = FRAMESIZE_240X240;
   Camera.config.pixel_format = PIXFORMAT_RGB565;
   Camera.config.fb_location = CAMERA_FB_IN_PSRAM;
+}
+
+void configCameraCommon() {
+  Camera.config.jpeg_quality = jpgqlty;
+  Camera.config.frame_size = fsize;
 }
 
 void camera_deep_sleep(bool enable) {
@@ -85,13 +87,15 @@ void cameraInit() {
 }
 
 void printSettings(Stream *response){
+  String fsselect = String(fskeys[fsize]);
+  stripTabs(&fsselect);
   response->println();
-  response->printf("display target\t: %s\r\n",cfg.getString(PKEYS::KTMAC,"none").c_str());
-  response->printf("jpeg decoder  \t: %s\r\n",jpgmode ? "internal" : "external");
-  response->printf("jpeg quality  \t: %i\r\n",Camera.config.jpeg_quality);
-  response->printf("jpeg delay    \t: %i\r\n",jpgwait);
-  response->printf("fbuffer count \t: %i\r\n",Camera.config.fb_count);
-  response->printf("frame size    \t: %i\r\n",Camera.config.frame_size);
+  response->printf("display target\t: %s\r\n", cfg.getString(PKEYS::KTMAC, "none").c_str());
+  response->printf("frame size    \t: %s\r\n", fsselect.c_str());
+  response->printf("jpeg decoder  \t: %s\r\n", jpgmode ? "internal" : "external");
+  response->printf("jpeg quality  \t: %i\r\n", Camera.config.jpeg_quality);
+  response->printf("jpeg delay    \t: %i\r\n", jpgwait);
+  response->printf("fbuffer count \t: %i\r\n", Camera.config.fb_count);
 }
 
 void info(char *args, Stream *response) {
@@ -125,7 +129,7 @@ void set_jpgd(char *args, Stream *response) {
   Pair<String, String> operands = wcli.parseCommand(args);
   jpgwait = operands.first().toInt();
   response->printf("jpg decoding delay: \t%i\r\n", jpgwait);
-  cfg.saveInt(PKEYS::KJPGD,jpgwait);
+  cfg.saveInt(PKEYS::KJPGD, jpgwait);
 }
 
 void set_target(char *args, Stream *response) {
@@ -140,6 +144,23 @@ void set_target(char *args, Stream *response) {
     response->printf("target display saved: \t%s\r\n",starget.c_str());
   } else
     response->println("mac address bad format");
+}
+
+void set_fsize(char *args, Stream *response) {
+  Pair<String, String> operands = wcli.parseCommand(args);
+  String input = operands.first();
+  uint8_t select = input.toInt();
+  if (input.isEmpty()) {
+    response->println("Invalid selection. Please enter a number of:\r\n");
+    for (int i=0; i<MFRAME_SIZE::MFSIZE_INVALID; i++) {
+      response->printf("[%02i] %s\r\n", i, String(fskeys[i]).c_str());
+    }
+  }
+  else {
+    response->printf("framse size set to\t: %s\r\n", String(fskeys[select]).c_str());
+    fsize = (framesize_t) select;
+    cfg.saveInt(PKEYS::KFSIZE, select);
+  }
 }
 
 void enable_debug(char *args, Stream *response) {
@@ -188,8 +209,9 @@ void setup_exit(char *args, Stream *response) {
 
 void initCameraSetup() {
   jpgmode = cfg.getBool(PKEYS::KJPGM, true);
-  jpgwait = cfg.getInt(PKEYS::KJPGD, 60);
+  jpgwait = cfg.getInt(PKEYS::KJPGD, 80);
   jpgqlty = cfg.getInt(PKEYS::KJPGQ, 12);
+  fsize = (framesize_t)cfg.getInt(PKEYS::KFSIZE, FRAMESIZE_QVGA);
   if (cfg.getBool(PKEYS::KSETUP, false)) {
     setup_mode=1;
     Serial.println("\r\nCamera Setup. Type \"exit\" to leave");
@@ -201,22 +223,18 @@ void initCameraSetup() {
     Serial.println("\r\nSettings saved. Booting..\r\n");
   }
   wcli.loop();
+  configCameraCommon();
   if (jpgmode)
     configCameraInternalJPG();
   else
     configCameraExternalJPG();
 }
 
-void espnowInit(){
-  // My M5Core2 receiver B8:F0:09:C6:0E:CC
-  // const uint8_t macRecv[6] = {0xB8,0xF0,0x09,0xC6,0x0E,0xCC};
-  // My CrowPanel receiver B0:81:84:74:18:2C
-  // const uint8_t macRecv[6] = {0xB0,0x81,0x84,0x74,0x18,0x2C};
+void espnowInit(){ 
   String starget = cfg.getString(PKEYS::KTMAC,"");
   if (!starget.isEmpty()){
     str2mac(starget.c_str(), tmac);
     radio.setTarget(tmac);
-    // for (int i=0; i<6; i++) response->printf("%02X:",tmac[i]);
   }
   radio.init();
 }
@@ -227,6 +245,7 @@ void initSerialShell(){
   wcli.add("jpgqlty", &set_jpgq,       "\tset JPG quality");
   wcli.add("jpgwait", &set_jpgd,       "\tset JPG decoding delay");
   wcli.add("target",  &set_target,     "\tset the macaddress of the display target");
+  wcli.add("fsize",   &set_fsize,      "\t\tset frame size output");
   wcli.add("info",    &info,           "\t\tsystem status info");
   wcli.add("debug",   &enable_debug,   "\t\ttoggle debug mode");
   wcli.add("setup",   &setup_init,     "\t\tenter to safe mode or camera setup");

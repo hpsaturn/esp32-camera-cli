@@ -31,3 +31,7 @@ inline void printMacAddress(uint8_t * macAddress){
     formatMacAddress(macAddress, macStr, 18);
     log_i("%s",macStr);
 }
+
+inline void stripTabs (String *input){
+  return input->replace("\t","");
+}
