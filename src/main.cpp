@@ -96,6 +96,7 @@ void printSettings(Stream *response){
   response->printf("jpeg quality  \t: %i\r\n", Camera.config.jpeg_quality);
   response->printf("jpeg delay    \t: %i\r\n", jpgwait);
   response->printf("fbuffer count \t: %i\r\n", Camera.config.fb_count);
+  response->printf("channel       \t: %i\r\n", cfg.getInt(PKEYS::KCHANL, -1));
 }
 
 void info(char *args, Stream *response) {
@@ -130,6 +131,21 @@ void set_jpgd(char *args, Stream *response) {
   jpgwait = operands.first().toInt();
   response->printf("jpg decoding delay: \t%i\r\n", jpgwait);
   cfg.saveInt(PKEYS::KJPGD, jpgwait);
+}
+
+void set_channel(char *args, Stream *response) {
+  if (!setup_mode){
+    response->println("This setting is only possible in setup mode. Type setup");
+    return;
+  }
+  Pair<String, String> operands = wcli.parseCommand(args);
+  int channel = operands.first().toInt();
+  if (channel > 0 && channel < 14) {
+    cfg.saveInt(PKEYS::KCHANL, channel);
+    response->printf("WiFi channel set to: \t%i\r\n", channel);
+  } else {
+    response->println("Invalid WiFi channel. Please enter a number between 1 and 13.");
+  }
 }
 
 void set_target(char *args, Stream *response) {
@@ -236,6 +252,7 @@ void espnowInit(){
     str2mac(starget.c_str(), tmac);
     radio.setTarget(tmac);
   }
+  radio.setChannel(cfg.getInt(PKEYS::KCHANL, -1));
   radio.init();
 }
 
@@ -245,6 +262,7 @@ void initSerialShell(){
   wcli.add("jpgqlty", &set_jpgq,       "\tset JPG quality");
   wcli.add("jpgwait", &set_jpgd,       "\tset JPG decoding delay");
   wcli.add("target",  &set_target,     "\tset the macaddress of the display target");
+  wcli.add("channel", &set_channel,    "\tset the WiFi channel");
   wcli.add("fsize",   &set_fsize,      "\t\tset frame size output");
   wcli.add("info",    &info,           "\t\tsystem status info");
   wcli.add("debug",   &enable_debug,   "\t\ttoggle debug mode");
